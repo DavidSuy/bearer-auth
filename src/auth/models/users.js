@@ -2,19 +2,25 @@
 
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const SECRET = process.env.SECRET || 'somethingsecret';
+
+const SECRET = process.env.SECRET;
+
+const DAY = 86400;
+const getFutureTime = (sec) => {
+  return Date.now() + sec * 1000;
+};
 
 const userSchema = (sequelize, DataTypes) => {
-  const model = sequelize.define('User', {
+  const model = sequelize.define('Users', {
     username: { type: DataTypes.STRING, allowNull: false, unique: true },
     password: { type: DataTypes.STRING, allowNull: false },
     token: {
       type: DataTypes.VIRTUAL,
       get() {
-        return jwt.sign({ username: this.username }, SECRET);
-      },
-      set(payload) {
-        return jwt.sign(payload, API_SECRET);
+        return jwt.sign(
+          { username: this.username, exp: getFutureTime(1 * DAY) },
+          SECRET
+        );
       },
     },
   });
@@ -26,7 +32,7 @@ const userSchema = (sequelize, DataTypes) => {
 
   // Basic AUTH: Validating strings (username, password)
   model.authenticateBasic = async function (username, password) {
-    const user = await this.findOne({ where: { username: username } });
+    const user = await this.findOne({ where: { username } });
     const valid = await bcrypt.compare(password, user.password);
     if (valid) {
       return user;
@@ -38,7 +44,11 @@ const userSchema = (sequelize, DataTypes) => {
   model.authenticateToken = async function (token) {
     try {
       const parsedToken = jwt.verify(token, process.env.SECRET);
-      const user = this.findOne({ username: parsedToken.username });
+      const { exp, username } = parsedToken;
+      if (exp < Date.now()) {
+        throw new Error('Token has expired.');
+      }
+      const user = this.findOne({ where: { username } });
       if (user) {
         return user;
       }
